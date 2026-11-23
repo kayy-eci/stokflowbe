@@ -23,6 +23,8 @@ export async function updateCategory(id: number, data: UpdateCategoryInput) {
 }
 
 export async function deleteCategory(id: number) {
+    // Produk di kategori ini jadi tanpa kategori dulu, baru kategorinya dihapus
+    await pool.query("UPDATE products SET category_id = NULL WHERE category_id = $1", [id]);
     const result = await pool.query(
         "DELETE FROM categories WHERE id = $1 RETURNING *",
         [id]

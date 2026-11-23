@@ -3,10 +3,34 @@ import { tokenMiddleWare } from "../middleware/auth.middleware.ts";
 import { staffMiddleware } from "../middleware/staff.middleware.ts";
 import { CreateOrderSchema } from "../models/schema.ts";
 import * as ordersService from "../services/orders.service.ts";
+import * as productsService from "../services/products.service.ts";
+import * as categoriesService from "../services/categories.service.ts";
 
 const router = Router();
 
 router.use(tokenMiddleWare, staffMiddleware);
+
+// Katalog produk untuk POS staff (hanya produk aktif)
+router.get("/products", async (req, res) => {
+    try {
+        const data = await productsService.getAllProducts();
+        res.status(200).json({ message: "Berhasil fetch products!", data });
+    } catch (error) {
+        console.error("Get products error:", error);
+        res.status(500).json({ message: "Gagal mengambil data produk" });
+    }
+});
+
+// Kategori untuk filter katalog staff
+router.get("/categories", async (req, res) => {
+    try {
+        const data = await categoriesService.getAllCategories();
+        res.status(200).json({ message: "Berhasil fetch categories!", data });
+    } catch (error) {
+        console.error("Get categories error:", error);
+        res.status(500).json({ message: "Gagal mengambil data kategori" });
+    }
+});
 
 router.post("/orders", async (req, res) => {
     const parsed = CreateOrderSchema.safeParse(req.body);

@@ -77,3 +77,14 @@ export async function getOrdersByStaff(staffId: number) {
     );
     return result.rows;
 }
+
+// Semua order dari semua staff, untuk dashboard owner
+export async function getAllOrders() {
+    const result = await pool.query(
+        `SELECT o.*, u.name AS staff_name
+         FROM orders o
+         JOIN users u ON u.id = o.staff_id
+         ORDER BY o.created_at DESC`
+    );
+    return result.rows;
+}

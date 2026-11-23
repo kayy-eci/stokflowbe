@@ -12,6 +12,7 @@ import * as categoriesService from "../services/categories.service.ts";
 import * as productsService from "../services/products.service.ts";
 import * as stockAdjustmentsService from "../services/stockAdjustments.service.ts";
 import * as reportsService from "../services/reports.service.ts";
+import * as ordersService from "../services/orders.service.ts";
 
 const router = Router();
 
@@ -167,6 +168,16 @@ router.post("/stock-adjustments", async (req, res) => {
         console.error("Create stock adjustment error:", error);
         const msg = error instanceof Error ? error.message : "Gagal menyesuaikan stok";
         res.status(400).json({ message: msg });
+    }
+});
+
+router.get("/orders", async (req, res) => {
+    try {
+        const data = await ordersService.getAllOrders();
+        res.status(200).json({ message: "Berhasil fetch semua order!", data });
+    } catch (error) {
+        console.error("Get all orders error:", error);
+        res.status(500).json({ message: "Gagal mengambil riwayat transaksi" });
     }
 });
 
