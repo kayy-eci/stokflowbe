@@ -18,6 +18,12 @@ import * as reportsService from "../services/reports.service.ts";
 import * as ordersService from "../services/orders.service.ts";
 import * as usersService from "../services/users.service.ts";
 import * as subscriptionsService from "../services/subscriptions.service.ts";
+import {
+    uploadProductImage,
+    destroyImage,
+} from "../services/cloudinary.service.ts";
+import { uploadSingleImage } from "../middleware/upload.middleware.ts";
+import { isCloudinaryConfigured } from "../config/cloudinary.ts";
 
 const router = Router();
 
@@ -142,6 +148,78 @@ router.patch("/products/:id/deactivate", async (req, res) => {
     } catch (error) {
         console.error("Deactivate product error:", error);
         res.status(500).json({ message: "Gagal menonaktifkan produk" });
+    }
+});
+
+/**
+ * Upload/replace foto produk (multipart, field `image`, maks 5 MB).
+ * Hasil Cloudinary langsung disimpan ke kolom produk, jadi klien cukup
+ * memanggil satu endpoint ini setelah produk dibuat.
+ */
+router.post("/products/:id/image", uploadSingleImage, async (req, res) => {
+    if (!isCloudinaryConfigured) {
+        res.status(503).json({
+            message: "Upload gambar belum dikonfigurasi di server",
+        });
+        return;
+    }
+
+    const file = req.file;
+    if (!file) {
+        res.status(400).json({ message: "File gambar wajib dikirim" });
+        return;
+    }
+
+    const productId = Number(req.params.id);
+
+    try {
+        const product = await productsService.getProductById(productId);
+        if (!product) {
+            res.status(404).json({ message: "Produk tidak ditemukan" });
+            return;
+        }
+
+        const uploaded = await uploadProductImage(file.buffer, productId);
+
+        // Baru hapus gambar lama setelah upload baru berhasil, supaya produk
+        // tidak pernah tanpa gambar kalau upload gagal di tengah jalan.
+        if (product.image_public_id) {
+            await destroyImage(String(product.image_public_id));
+        }
+
+        const data = await productsService.updateProduct(productId, uploaded);
+        res.status(200).json({ message: "Foto produk diperbarui!", data });
+    } catch (error) {
+        console.error("Upload product image error:", error);
+        const msg =
+            error instanceof Error ? error.message : "Gagal mengunggah gambar";
+        res.status(500).json({ message: msg });
+    }
+});
+
+/** Hapus foto produk dari Cloudinary dan kosongkan kolomnya. */
+router.delete("/products/:id/image", async (req, res) => {
+    const productId = Number(req.params.id);
+
+    try {
+        const product = await productsService.getProductById(productId);
+        if (!product) {
+            res.status(404).json({ message: "Produk tidak ditemukan" });
+            return;
+        }
+
+        if (product.image_public_id) {
+            await destroyImage(String(product.image_public_id));
+        }
+
+        const data = await productsService.updateProduct(productId, {
+            image_url: null,
+            image_public_id: null,
+        });
+        res.status(200).json({ message: "Foto produk dihapus!", data });
+    } catch (error) {
+        console.error("Delete product image error:", error);
+        res.status(500).json({ message: "Gagal menghapus foto produk" });
     }
 });
 
