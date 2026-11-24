@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { tokenMiddleWare } from "../middleware/auth.middleware.ts";
+import { tokenMiddleWare, activeUserMiddleWare } from "../middleware/auth.middleware.ts";
 import { staffMiddleware } from "../middleware/staff.middleware.ts";
 import { CreateOrderSchema } from "../models/schema.ts";
 import * as ordersService from "../services/orders.service.ts";
@@ -8,12 +8,14 @@ import * as categoriesService from "../services/categories.service.ts";
 
 const router = Router();
 
-router.use(tokenMiddleWare, staffMiddleware);
+// Token lama tetap valid sampai kedaluwarsa, jadi status aktif dicek tiap
+// request supaya staff yang dinonaktifkan owner langsung kehilangan akses.
+router.use(tokenMiddleWare, staffMiddleware, activeUserMiddleWare);
 
-// Katalog produk untuk POS staff (hanya produk aktif)
+// Katalog produk untuk POS staff (hanya produk aktif, tanpa harga modal)
 router.get("/products", async (req, res) => {
     try {
-        const data = await productsService.getAllProducts();
+        const data = await productsService.getActiveProductsForStaff();
         res.status(200).json({ message: "Berhasil fetch products!", data });
     } catch (error) {
         console.error("Get products error:", error);
@@ -61,6 +63,26 @@ router.get("/orders", async (req, res) => {
     } catch (error) {
         console.error("Get orders error:", error);
         res.status(500).json({ message: "Gagal mengambil riwayat order" });
+    }
+});
+
+// Detail satu order. `staffId` membatasi ke order milik staff pemanggil,
+// jadi order staff lain terbaca sebagai 404.
+router.get("/orders/:id", async (req, res) => {
+    try {
+        const staffId = res.locals.user!.id;
+        const data = await ordersService.getOrderWithItems(
+            Number(req.params.id),
+            staffId
+        );
+        if (!data) {
+            res.status(404).json({ message: "Transaksi tidak ditemukan" });
+            return;
+        }
+        res.status(200).json({ message: "Berhasil fetch transaksi!", data });
+    } catch (error) {
+        console.error("Get order detail error:", error);
+        res.status(500).json({ message: "Gagal mengambil detail transaksi" });
     }
 });
 

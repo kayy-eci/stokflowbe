@@ -24,6 +24,20 @@ export const UpdateUserSchema = z.object({
   role: UserRoleSchema.optional(),
 });
 
+/** Payload edit staff dari owner (nama, reset password, status aktif). */
+export const UpdateStaffSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  password: z.string().min(8).optional(),
+  is_active: z.boolean().optional(),
+});
+
+/** Payload owner membuat akun staff — role selalu `staff`. */
+export const CreateStaffSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email().max(150),
+  password: z.string().min(8),
+});
+
 export const UserResponseSchema = z.object({
   id: z.number().int().positive(),
   name: z.string(),
@@ -53,6 +67,12 @@ export const CategoryResponseSchema = z.object({
 });
 
 
+/** URL & public id gambar produk (hasil upload ke penyimpanan gambar). */
+const ImageSchema = z.object({
+  image_url: z.string().max(1000).nullable().optional(),
+  image_public_id: z.string().max(255).nullable().optional(),
+});
+
 export const CreateProductSchema = z.object({
   sku: z.string().min(1).max(50),
   name: z.string().min(1).max(150),
@@ -62,6 +82,7 @@ export const CreateProductSchema = z.object({
   stock_qty: z.number().int().nonnegative().default(0),
   low_stock_threshold: z.number().int().nonnegative().default(5),
   is_active: z.boolean().default(true),
+  ...ImageSchema.shape,
 });
 
 export const UpdateProductSchema = z.object({
@@ -73,6 +94,7 @@ export const UpdateProductSchema = z.object({
   stock_qty: z.number().int().nonnegative().optional(),
   low_stock_threshold: z.number().int().nonnegative().optional(),
   is_active: z.boolean().optional(),
+  ...ImageSchema.shape,
 });
 
 export const ProductResponseSchema = z.object({
@@ -89,6 +111,9 @@ export const ProductResponseSchema = z.object({
   updated_at: z.date(),
 });
 
+/** Metode bayar order — harus sama dengan enum `order_payment_method`. */
+export const OrderPaymentMethodSchema = z.enum(["tunai", "qris", "transfer"]);
+
 export const CreateOrderSchema = z.object({
   items: z.array(
     z.object({
@@ -96,6 +121,9 @@ export const CreateOrderSchema = z.object({
       quantity: z.number().int().positive(),
     })
   ).min(1),
+  payment_method: OrderPaymentMethodSchema.default("tunai"),
+  // Hanya untuk tunai; NULL diizinkan (pembeli bayar pas).
+  cash_received: z.number().nonnegative().nullable().optional(),
 });
 
 export const OrderResponseSchema = z.object({
@@ -149,3 +177,21 @@ export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
 export type CreateStockAdjustmentInput = z.infer<
   typeof CreateStockAdjustmentSchema
 >;
+
+/*
+ * Paket langganan & pembayaran.
+ */
+
+export const PlanPaymentMethodSchema = z.enum(["qris", "va", "ewallet"]);
+
+/** Memulai pembayaran paket (simulasi — tidak ada gateway asli). */
+export const CreatePaymentSchema = z.object({
+  plan_id: z.number().int().positive(),
+  method: PlanPaymentMethodSchema,
+});
+
+export type UpdateStaffInput = z.infer<typeof UpdateStaffSchema>;
+export type CreateStaffInput = z.infer<typeof CreateStaffSchema>;
+export type CreatePaymentInput = z.infer<typeof CreatePaymentSchema>;
+export type OrderPaymentMethod = z.infer<typeof OrderPaymentMethodSchema>;
+export type PlanPaymentMethod = z.infer<typeof PlanPaymentMethodSchema>;

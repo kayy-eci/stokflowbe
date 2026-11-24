@@ -1,6 +1,13 @@
 import { pool } from "../config/db.ts";
 import type { CreateOrderInput } from "../models/schema.ts";
 
+/**
+ * Simpan order + item + potong stok dalam satu transaksi database.
+ *
+ * `payment_method` dan `cash_received` ditulis ke tabel `orders`; constraint
+ * `orders_cash_received_check` menolak kas tunai yang kurang dari total, jadi
+ * periksa dulu di sini supaya pesannya jelas bagi kasir.
+ */
 export async function createOrder(staffId: number, data: CreateOrderInput) {
     const client = await pool.connect();
 
@@ -10,6 +17,7 @@ export async function createOrder(staffId: number, data: CreateOrderInput) {
         let total = 0;
         const itemsWithPrice: Array<{
             productId: number;
+            productName: string;
             quantity: number;
             unitPrice: number;
             subtotal: number;
@@ -18,7 +26,7 @@ export async function createOrder(staffId: number, data: CreateOrderInput) {
         for (const item of data.items) {
             // Lock baris produk ini biar gak ada transaksi lain yang baca stok bareng
             const productResult = await client.query(
-                "SELECT id, sell_price, stock_qty FROM products WHERE id = $1 FOR UPDATE",
+                "SELECT id, name, sell_price, stock_qty FROM products WHERE id = $1 FOR UPDATE",
                 [item.product_id]
             );
 
@@ -36,22 +44,45 @@ export async function createOrder(staffId: number, data: CreateOrderInput) {
 
             itemsWithPrice.push({
                 productId: Number(item.product_id),
+                productName: String(product.name),
                 quantity: item.quantity,
                 unitPrice,
                 subtotal,
             });
         }
 
+        const paymentMethod = data.payment_method ?? "tunai";
+        const cashReceived =
+            paymentMethod === "tunai" && data.cash_received != null
+                ? data.cash_received
+                : null;
+
+        if (cashReceived !== null && cashReceived < total) {
+            throw new Error(
+                `Uang diterima kurang dari total (${total.toLocaleString("id-ID")})`
+            );
+        }
+
         const orderResult = await client.query(
-            "INSERT INTO orders (staff_id, total_amount) VALUES ($1, $2) RETURNING *",
-            [staffId, total]
+            `INSERT INTO orders (staff_id, total_amount, payment_method, cash_received)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [staffId, total, paymentMethod, cashReceived]
         );
         const order = orderResult.rows[0];
 
         for (const item of itemsWithPrice) {
             await client.query(
-                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES ($1, $2, $3, $4, $5)",
-                [order.id, item.productId, item.quantity, item.unitPrice, item.subtotal]
+                `INSERT INTO order_items
+                     (order_id, product_id, product_name, quantity, unit_price, subtotal)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                    order.id,
+                    item.productId,
+                    item.productName,
+                    item.quantity,
+                    item.unitPrice,
+                    item.subtotal,
+                ]
             );
 
             await client.query(
@@ -76,6 +107,37 @@ export async function getOrdersByStaff(staffId: number) {
         [staffId]
     );
     return result.rows;
+}
+
+/**
+ * Satu order lengkap dengan item-nya untuk layar detail.
+ *
+ * `staffId` membatasi akses: staff hanya bisa membuka order miliknya sendiri.
+ * Owner memanggil versi tanpa batas lewat [getOrderByIdForOwner].
+ */
+export async function getOrderWithItems(orderId: number, staffId?: number) {
+    const orderResult = await pool.query(
+        `SELECT o.*, u.name AS staff_name
+         FROM orders o
+         JOIN users u ON u.id = o.staff_id
+         WHERE o.id = $1 ${staffId === undefined ? "" : "AND o.staff_id = $2"}`,
+        staffId === undefined ? [orderId] : [orderId, staffId]
+    );
+    const order = orderResult.rows[0];
+    if (!order) return null;
+
+    const itemsResult = await pool.query(
+        `SELECT oi.id, oi.product_id,
+                COALESCE(oi.product_name, p.name) AS product_name,
+                oi.quantity, oi.unit_price, oi.subtotal
+         FROM order_items oi
+         LEFT JOIN products p ON p.id = oi.product_id
+         WHERE oi.order_id = $1
+         ORDER BY oi.id ASC`,
+        [orderId]
+    );
+
+    return { ...order, items: itemsResult.rows };
 }
 
 // Semua order dari semua staff, untuk dashboard owner

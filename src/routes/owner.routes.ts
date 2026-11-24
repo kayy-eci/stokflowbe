@@ -7,12 +7,17 @@ import {
     CreateProductSchema,
     UpdateProductSchema,
     CreateStockAdjustmentSchema,
+    CreateStaffSchema,
+    UpdateStaffSchema,
+    CreatePaymentSchema,
 } from "../models/schema.ts";
 import * as categoriesService from "../services/categories.service.ts";
 import * as productsService from "../services/products.service.ts";
 import * as stockAdjustmentsService from "../services/stockAdjustments.service.ts";
 import * as reportsService from "../services/reports.service.ts";
 import * as ordersService from "../services/orders.service.ts";
+import * as usersService from "../services/users.service.ts";
+import * as subscriptionsService from "../services/subscriptions.service.ts";
 
 const router = Router();
 
@@ -236,6 +241,165 @@ router.get("/reports/low-stock", async (req, res) => {
     } catch (error) {
         console.error("Get low stock error:", error);
         res.status(500).json({ message: "Gagal mengambil data stok menipis" });
+    }
+});
+
+// ===== Manajemen staff =====
+
+router.get("/staff", async (req, res) => {
+    try {
+        const data = await usersService.getStaffUsers();
+        res.status(200).json({ message: "Berhasil fetch staff!", data });
+    } catch (error) {
+        console.error("Get staff error:", error);
+        res.status(500).json({ message: "Gagal mengambil data staff" });
+    }
+});
+
+router.post("/staff", async (req, res) => {
+    const parsed = CreateStaffSchema.safeParse(req.body);
+    if (!parsed.success) {
+        res.status(400).json({
+            message: "Data staff tidak valid",
+            errors: parsed.error.flatten(),
+        });
+        return;
+    }
+
+    try {
+        const existing = await usersService.getUserByEmail(parsed.data.email);
+        if (existing) {
+            res.status(409).json({ message: "Email sudah terdaftar" });
+            return;
+        }
+
+        // Role selalu staff — endpoint ini tidak boleh membuat owner.
+        const data = await usersService.createUser({
+            ...parsed.data,
+            role: "staff",
+        });
+        res.status(201).json({ message: "Berhasil membuat akun staff!", data });
+    } catch (error) {
+        console.error("Create staff error:", error);
+        res.status(500).json({ message: "Gagal membuat akun staff" });
+    }
+});
+
+router.patch("/staff/:id", async (req, res) => {
+    const parsed = UpdateStaffSchema.safeParse(req.body);
+    if (!parsed.success) {
+        res.status(400).json({
+            message: "Data staff tidak valid",
+            errors: parsed.error.flatten(),
+        });
+        return;
+    }
+
+    try {
+        const data = await usersService.updateStaff(
+            Number(req.params.id),
+            parsed.data
+        );
+        if (!data) {
+            res.status(404).json({ message: "Staff tidak ditemukan" });
+            return;
+        }
+        res.status(200).json({ message: "Berhasil update staff!", data });
+    } catch (error) {
+        console.error("Update staff error:", error);
+        res.status(500).json({ message: "Gagal update staff" });
+    }
+});
+
+// ===== Detail transaksi =====
+
+router.get("/orders/:id", async (req, res) => {
+    try {
+        const data = await ordersService.getOrderWithItems(Number(req.params.id));
+        if (!data) {
+            res.status(404).json({ message: "Transaksi tidak ditemukan" });
+            return;
+        }
+        res.status(200).json({ message: "Berhasil fetch transaksi!", data });
+    } catch (error) {
+        console.error("Get order detail error:", error);
+        res.status(500).json({ message: "Gagal mengambil detail transaksi" });
+    }
+});
+
+// ===== Paket langganan & pembayaran (simulasi) =====
+
+router.get("/plans", async (req, res) => {
+    try {
+        const data = await subscriptionsService.getActivePlans();
+        res.status(200).json({ message: "Berhasil fetch paket!", data });
+    } catch (error) {
+        console.error("Get plans error:", error);
+        res.status(500).json({ message: "Gagal mengambil data paket" });
+    }
+});
+
+router.get("/subscription", async (req, res) => {
+    try {
+        const ownerId = res.locals.user!.id;
+        const [active, history] = await Promise.all([
+            subscriptionsService.getActiveSubscription(ownerId),
+            subscriptionsService.getSubscriptionHistory(ownerId),
+        ]);
+        res.status(200).json({
+            message: "Berhasil fetch langganan!",
+            data: { active, history },
+        });
+    } catch (error) {
+        console.error("Get subscription error:", error);
+        res.status(500).json({ message: "Gagal mengambil data langganan" });
+    }
+});
+
+router.get("/payments", async (req, res) => {
+    try {
+        const ownerId = res.locals.user!.id;
+        const data = await subscriptionsService.getPayments(ownerId);
+        res.status(200).json({ message: "Berhasil fetch pembayaran!", data });
+    } catch (error) {
+        console.error("Get payments error:", error);
+        res.status(500).json({ message: "Gagal mengambil riwayat pembayaran" });
+    }
+});
+
+router.post("/payments", async (req, res) => {
+    const parsed = CreatePaymentSchema.safeParse(req.body);
+    if (!parsed.success) {
+        res.status(400).json({
+            message: "Data pembayaran tidak valid",
+            errors: parsed.error.flatten(),
+        });
+        return;
+    }
+
+    try {
+        const ownerId = res.locals.user!.id;
+        const data = await subscriptionsService.createPayment(ownerId, parsed.data);
+        res.status(201).json({ message: "Tagihan dibuat!", data });
+    } catch (error) {
+        console.error("Create payment error:", error);
+        const msg = error instanceof Error ? error.message : "Gagal membuat tagihan";
+        res.status(400).json({ message: msg });
+    }
+});
+
+router.post("/payments/:id/confirm", async (req, res) => {
+    try {
+        const ownerId = res.locals.user!.id;
+        const result = await subscriptionsService.confirmPayment(
+            ownerId,
+            Number(req.params.id)
+        );
+        res.status(200).json({ message: "Pembayaran berhasil!", data: result });
+    } catch (error) {
+        console.error("Confirm payment error:", error);
+        const msg = error instanceof Error ? error.message : "Gagal konfirmasi pembayaran";
+        res.status(400).json({ message: msg });
     }
 });
 

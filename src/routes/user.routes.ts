@@ -85,6 +85,12 @@ router.post("/auth/login", async (req: Request, res: Response) => {
       return;
     }
 
+    // Akun yang dinonaktifkan owner tidak boleh login.
+    if (user.is_active === false) {
+      res.status(403).json({ message: "Akun ini sudah dinonaktifkan" });
+      return;
+    }
+
     const { password_hash, ...safeUser } = user;
     const token = createToken(user);
 
