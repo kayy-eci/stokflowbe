@@ -1,36 +1,55 @@
 import { pool } from "../config/db.ts";
 
-export async function getRevenueSummary(startDate: string, endDate: string) {
-    // Rentang inklusif sampai akhir hari `endDate`. `BETWEEN '2026-11-21'
-    // AND '2026-11-21'` hanya mencakup pukul 00:00, jadi transaksi siang/sore
-    // hilang dari laporan.
+/**
+ * Semua laporan dibatasi oleh owner. Transaksi dihubungkan ke owner lewat
+ * staff yang membuatnya (`orders.staff_id -> users.owner_id`), dan produk
+ * juga dibatasi langsung lewat `products.owner_id`.
+ */
+
+export async function getRevenueSummary(
+    startDate: string,
+    endDate: string,
+    ownerId: number
+) {
     const result = await pool.query(
-        `SELECT COALESCE(SUM(total_amount), 0) AS total_revenue, COUNT(*) AS total_orders
-         FROM orders
-         WHERE created_at >= $1::date
-           AND created_at < ($2::date + interval '1 day')`,
-        [startDate, endDate]
+        `SELECT COALESCE(SUM(o.total_amount), 0) AS total_revenue,
+                COUNT(*)::int AS total_orders
+         FROM orders o
+         JOIN users u ON u.id = o.staff_id AND u.owner_id = $3
+         WHERE o.created_at >= $1::date
+           AND o.created_at < ($2::date + interval '1 day')`,
+        [startDate, endDate, ownerId]
     );
     return result.rows[0];
 }
 
-export async function getTopProducts(startDate: string, endDate: string, limit = 10) {
+export async function getTopProducts(
+    startDate: string,
+    endDate: string,
+    ownerId: number,
+    limit = 10
+) {
     const result = await pool.query(
         `SELECT p.id, p.name, SUM(oi.quantity) AS total_sold, SUM(oi.subtotal) AS total_revenue
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
-         JOIN products p ON p.id = oi.product_id
+         JOIN users u ON u.id = o.staff_id AND u.owner_id = $4
+         JOIN products p ON p.id = oi.product_id AND p.owner_id = $4
          WHERE o.created_at >= $1::date
            AND o.created_at < ($2::date + interval '1 day')
          GROUP BY p.id, p.name
          ORDER BY total_sold DESC
          LIMIT $3`,
-        [startDate, endDate, limit]
+        [startDate, endDate, limit, ownerId]
     );
     return result.rows;
 }
 
-export async function getMarginReport(startDate: string, endDate: string) {
+export async function getMarginReport(
+    startDate: string,
+    endDate: string,
+    ownerId: number
+) {
     const result = await pool.query(
         `SELECT p.id, p.name,
             SUM(oi.quantity) AS total_sold,
@@ -39,19 +58,24 @@ export async function getMarginReport(startDate: string, endDate: string) {
             SUM(oi.subtotal) - SUM(oi.quantity * p.cost_price) AS total_margin
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
-         JOIN products p ON p.id = oi.product_id
+         JOIN users u ON u.id = o.staff_id AND u.owner_id = $3
+         JOIN products p ON p.id = oi.product_id AND p.owner_id = $3
          WHERE o.created_at >= $1::date
            AND o.created_at < ($2::date + interval '1 day')
          GROUP BY p.id, p.name
          ORDER BY total_margin DESC`,
-        [startDate, endDate]
+        [startDate, endDate, ownerId]
     );
     return result.rows;
 }
 
-export async function getLowStockProducts() {
+export async function getLowStockProducts(ownerId: number) {
     const result = await pool.query(
-        "SELECT * FROM products WHERE stock_qty <= low_stock_threshold AND is_active = true"
+        `SELECT * FROM products
+         WHERE stock_qty <= low_stock_threshold
+           AND is_active = true
+           AND owner_id = $1`,
+        [ownerId]
     );
     return result.rows;
 }

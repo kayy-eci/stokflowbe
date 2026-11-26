@@ -8,7 +8,11 @@ import type { CreateOrderInput } from "../models/schema.ts";
  * `orders_cash_received_check` menolak kas tunai yang kurang dari total, jadi
  * periksa dulu di sini supaya pesannya jelas bagi kasir.
  */
-export async function createOrder(staffId: number, data: CreateOrderInput) {
+export async function createOrder(
+    staffId: number,
+    ownerId: number,
+    data: CreateOrderInput
+) {
     const client = await pool.connect();
 
     try {
@@ -26,8 +30,9 @@ export async function createOrder(staffId: number, data: CreateOrderInput) {
         for (const item of data.items) {
             // Lock baris produk ini biar gak ada transaksi lain yang baca stok bareng
             const productResult = await client.query(
-                "SELECT id, name, sell_price, stock_qty FROM products WHERE id = $1 FOR UPDATE",
-                [item.product_id]
+                `SELECT id, name, sell_price, stock_qty FROM products
+                 WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
+                [item.product_id, ownerId]
             );
 
             const product = productResult.rows[0];
@@ -115,13 +120,28 @@ export async function getOrdersByStaff(staffId: number) {
  * `staffId` membatasi akses: staff hanya bisa membuka order miliknya sendiri.
  * Owner memanggil versi tanpa batas lewat [getOrderByIdForOwner].
  */
-export async function getOrderWithItems(orderId: number, staffId?: number) {
+export async function getOrderWithItems(
+    orderId: number,
+    staffId?: number,
+    ownerId?: number
+) {
+    const conditions = ["o.id = $1"];
+    const params: unknown[] = [orderId];
+    if (staffId !== undefined) {
+        params.push(staffId);
+        conditions.push(`o.staff_id = $${params.length}`);
+    }
+    if (ownerId !== undefined) {
+        params.push(ownerId);
+        conditions.push(`u.owner_id = $${params.length}`);
+    }
+
     const orderResult = await pool.query(
         `SELECT o.*, u.name AS staff_name
          FROM orders o
          JOIN users u ON u.id = o.staff_id
-         WHERE o.id = $1 ${staffId === undefined ? "" : "AND o.staff_id = $2"}`,
-        staffId === undefined ? [orderId] : [orderId, staffId]
+         WHERE ${conditions.join(" AND ")}`,
+        params
     );
     const order = orderResult.rows[0];
     if (!order) return null;
@@ -140,13 +160,14 @@ export async function getOrderWithItems(orderId: number, staffId?: number) {
     return { ...order, items: itemsResult.rows };
 }
 
-// Semua order dari semua staff, untuk dashboard owner
-export async function getAllOrders() {
+/** Semua order milik staff dari owner ini, untuk dashboard owner. */
+export async function getOrdersByOwner(ownerId: number) {
     const result = await pool.query(
         `SELECT o.*, u.name AS staff_name
          FROM orders o
-         JOIN users u ON u.id = o.staff_id
-         ORDER BY o.created_at DESC`
+         JOIN users u ON u.id = o.staff_id AND u.owner_id = $1
+         ORDER BY o.created_at DESC`,
+        [ownerId]
     );
     return result.rows;
 }

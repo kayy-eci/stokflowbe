@@ -5,8 +5,22 @@ import { CreateOrderSchema } from "../models/schema.ts";
 import * as ordersService from "../services/orders.service.ts";
 import * as productsService from "../services/products.service.ts";
 import * as categoriesService from "../services/categories.service.ts";
+import * as usersService from "../services/users.service.ts";
 
 const router = Router();
+
+/**
+ * Owner dari staff yang sedang login. Staff tidak menyimpan toko sendiri —
+ * toko adalah owner yang membuat akunnya. Tanpa ini, POS bisa menampilkan
+ * dan menjual produk owner lain.
+ */
+const ownerIdForStaff = async (staffId: number) => {
+    const ownerId = await usersService.getOwnerIdForUser(staffId);
+    if (ownerId == null) {
+        throw new Error("Akun staff belum terikat ke owner toko");
+    }
+    return ownerId;
+};
 
 // Token lama tetap valid sampai kedaluwarsa, jadi status aktif dicek tiap
 // request supaya staff yang dinonaktifkan owner langsung kehilangan akses.
@@ -15,7 +29,8 @@ router.use(tokenMiddleWare, staffMiddleware, activeUserMiddleWare);
 // Katalog produk untuk POS staff (hanya produk aktif, tanpa harga modal)
 router.get("/products", async (req, res) => {
     try {
-        const data = await productsService.getActiveProductsForStaff();
+        const ownerId = await ownerIdForStaff(res.locals.user!.id);
+        const data = await productsService.getActiveProductsForStaff(ownerId);
         res.status(200).json({ message: "Berhasil fetch products!", data });
     } catch (error) {
         console.error("Get products error:", error);
@@ -26,7 +41,8 @@ router.get("/products", async (req, res) => {
 // Kategori untuk filter katalog staff
 router.get("/categories", async (req, res) => {
     try {
-        const data = await categoriesService.getAllCategories();
+        const ownerId = await ownerIdForStaff(res.locals.user!.id);
+        const data = await categoriesService.getCategoriesForStaff(ownerId);
         res.status(200).json({ message: "Berhasil fetch categories!", data });
     } catch (error) {
         console.error("Get categories error:", error);
@@ -46,7 +62,8 @@ router.post("/orders", async (req, res) => {
 
     try {
         const staffId = res.locals.user!.id;
-        const data = await ordersService.createOrder(staffId, parsed.data);
+        const ownerId = await ownerIdForStaff(staffId);
+        const data = await ordersService.createOrder(staffId, ownerId, parsed.data);
         res.status(201).json({ message: "Berhasil membuat order!", data });
     } catch (error) {
         console.error("Create order error:", error);

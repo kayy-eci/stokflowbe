@@ -1,24 +1,60 @@
 import { pool } from "../config/db.ts";
-import type { CreateUserInput, UpdateStaffInput } from "../models/schema.ts";
+import type {
+    CreateUserInput,
+    CreateStaffInput,
+    UpdateStaffInput,
+} from "../models/schema.ts";
 import { hashPassword } from "../utils/password.ts";
 
 /** Kolom user yang aman dikirim ke klien — tidak pernah `password_hash`. */
 const SAFE_COLUMNS =
     "id, name, email, role, is_active, created_at, updated_at";
 
-export const getAllUsers = async () => {
+/**
+ * Daftar akun yang boleh dilihat pemegang token. Owner melihat dirinya dan
+ * staff yang ia buat; staff hanya melihat dirinya. Role yang tidak dikenal
+ * sengaja jatuh ke cabang paling sempit, bukan mengembalikan semua akun.
+ */
+export const getVisibleUsers = async (
+    viewerId: number,
+    role?: string
+) => {
+    if (role === "owner") {
+        const result = await pool.query(
+            `SELECT ${SAFE_COLUMNS} FROM users
+             WHERE id = $1 OR (role = 'staff' AND owner_id = $1)
+             ORDER BY created_at ASC`,
+            [viewerId]
+        );
+        return result.rows;
+    }
+
     const result = await pool.query(
-        `SELECT ${SAFE_COLUMNS} FROM users ORDER BY created_at ASC`
+        `SELECT ${SAFE_COLUMNS} FROM users WHERE id = $1`,
+        [viewerId]
     );
     return result.rows;
 };
 
-/** Akun staff saja — dipakai layar Manajemen Staff milik owner. */
-export const getStaffUsers = async () => {
+/** Akun staff milik satu owner saja — dipakai layar Manajemen Staff. */
+export const getStaffUsers = async (ownerId: number) => {
     const result = await pool.query(
-        `SELECT ${SAFE_COLUMNS} FROM users WHERE role = 'staff' ORDER BY name ASC`
+        `SELECT ${SAFE_COLUMNS} FROM users
+         WHERE role = 'staff' AND owner_id = $1
+         ORDER BY name ASC`,
+        [ownerId]
     );
     return result.rows;
+};
+
+/** Ambil owner dari akun staff — dipakai route POS supaya staf hanya melihat toko induknya. */
+export const getOwnerIdForUser = async (userId: number) => {
+    const result = await pool.query(
+        "SELECT owner_id FROM users WHERE id = $1",
+        [userId]
+    );
+    const value = result.rows[0]?.owner_id;
+    return value == null ? null : Number(value);
 };
 
 export const getUserById = async (id: number) => {
@@ -50,10 +86,35 @@ export const createUser = async (data: CreateUserInput) => {
 };
 
 /**
- * Update staff oleh owner: nama, reset password, dan/atau status aktif.
- * Role tidak bisa diubah lewat sini.
+ * Buat akun staff untuk owner tertentu. Owner selalu diisi dari token,
+ * bukan dari body request, supaya klien tidak bisa menitipkan staff ke
+ * owner lain.
  */
-export const updateStaff = async (id: number, data: UpdateStaffInput) => {
+export const createStaffUser = async (
+    ownerId: number,
+    data: CreateStaffInput
+) => {
+    const passwordHash = await hashPassword(data.password);
+
+    const result = await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, owner_id)
+         VALUES ($1, $2, $3, 'staff', $4)
+         RETURNING ${SAFE_COLUMNS}`,
+        [data.name, data.email, passwordHash, ownerId]
+    );
+    return result.rows[0];
+};
+
+/**
+ * Update staff oleh owner: nama, reset password, dan/atau status aktif.
+ * Role tidak bisa diubah lewat sini, dan owner lain tidak bisa menyentuh
+ * staff yang bukan miliknya.
+ */
+export const updateStaff = async (
+    id: number,
+    ownerId: number,
+    data: UpdateStaffInput
+) => {
     const fields: string[] = [];
     const values: unknown[] = [];
 
@@ -72,17 +133,29 @@ export const updateStaff = async (id: number, data: UpdateStaffInput) => {
     }
 
     if (fields.length === 0) {
-        return getUserById(id);
+        return getStaffForOwner(id, ownerId);
     }
 
-    values.push(id);
+    values.push(id, ownerId);
     fields.push("updated_at = now()");
 
     const result = await pool.query(
         `UPDATE users SET ${fields.join(", ")}
-         WHERE id = $${values.length} AND role = 'staff'
+         WHERE id = $${values.length - 1}
+           AND owner_id = $${values.length}
+           AND role = 'staff'
          RETURNING ${SAFE_COLUMNS}`,
         values
+    );
+    return result.rows[0] ?? null;
+};
+
+/** Ambil satu staff hanya jika masih menjadi milik owner ini. */
+export const getStaffForOwner = async (id: number, ownerId: number) => {
+    const result = await pool.query(
+        `SELECT ${SAFE_COLUMNS} FROM users
+         WHERE id = $1 AND owner_id = $2 AND role = 'staff'`,
+        [id, ownerId]
     );
     return result.rows[0] ?? null;
 };

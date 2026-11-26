@@ -32,7 +32,7 @@ router.use(tokenMiddleWare, ownerMiddleware);
 // Kategori
 router.get("/categories", async (req, res) => {
     try {
-        const data = await categoriesService.getAllCategories();
+        const data = await categoriesService.getAllCategories(res.locals.user!.id);
         res.status(200).json({ message: "Berhasil fetch categories!", data });
     } catch (error) {
         console.error("Get categories error:", error);
@@ -48,7 +48,7 @@ router.post("/categories", async (req, res) => {
     }
 
     try {
-        const data = await categoriesService.createCategory(parsed.data);
+        const data = await categoriesService.createCategory(parsed.data, res.locals.user!.id);
         res.status(201).json({ message: "Berhasil membuat kategori!", data });
     } catch (error) {
         console.error("Create category error:", error);
@@ -64,7 +64,11 @@ router.put("/categories/:id", async (req, res) => {
     }
 
     try {
-        const data = await categoriesService.updateCategory(Number(req.params.id), parsed.data);
+        const data = await categoriesService.updateCategory(
+            Number(req.params.id),
+            parsed.data,
+            res.locals.user!.id
+        );
         if (!data) {
             res.status(404).json({ message: "Kategori tidak ditemukan" });
             return;
@@ -78,7 +82,7 @@ router.put("/categories/:id", async (req, res) => {
 
 router.delete("/categories/:id", async (req, res) => {
     try {
-        const data = await categoriesService.deleteCategory(Number(req.params.id));
+        const data = await categoriesService.deleteCategory(Number(req.params.id), res.locals.user!.id);
         if (!data) {
             res.status(404).json({ message: "Kategori tidak ditemukan" });
             return;
@@ -93,7 +97,7 @@ router.delete("/categories/:id", async (req, res) => {
 // Produk
 router.get("/products", async (req, res) => {
     try {
-        const data = await productsService.getAllProducts();
+        const data = await productsService.getAllProducts(res.locals.user!.id);
         res.status(200).json({ message: "Berhasil fetch products!", data });
     } catch (error) {
         console.error("Get products error:", error);
@@ -109,7 +113,12 @@ router.post("/products", async (req, res) => {
     }
 
     try {
-        const data = await productsService.createProduct(parsed.data);
+        const ownerId = res.locals.user!.id;
+        if (!(await productsService.categoryBelongsToOwner(parsed.data.category_id, ownerId))) {
+            res.status(400).json({ message: "Kategori tidak ditemukan" });
+            return;
+        }
+        const data = await productsService.createProduct(parsed.data, ownerId);
         res.status(201).json({ message: "Berhasil membuat produk!", data });
     } catch (error) {
         console.error("Create product error:", error);
@@ -125,7 +134,16 @@ router.put("/products/:id", async (req, res) => {
     }
 
     try {
-        const data = await productsService.updateProduct(Number(req.params.id), parsed.data);
+        const ownerId = res.locals.user!.id;
+        if (!(await productsService.categoryBelongsToOwner(parsed.data.category_id, ownerId))) {
+            res.status(400).json({ message: "Kategori tidak ditemukan" });
+            return;
+        }
+        const data = await productsService.updateProduct(
+            Number(req.params.id),
+            parsed.data,
+            ownerId
+        );
         if (!data) {
             res.status(404).json({ message: "Produk tidak ditemukan" });
             return;
@@ -139,7 +157,10 @@ router.put("/products/:id", async (req, res) => {
 
 router.patch("/products/:id/deactivate", async (req, res) => {
     try {
-        const data = await productsService.deactivateProduct(Number(req.params.id));
+        const data = await productsService.deactivateProduct(
+            Number(req.params.id),
+            res.locals.user!.id
+        );
         if (!data) {
             res.status(404).json({ message: "Produk tidak ditemukan" });
             return;
@@ -173,7 +194,10 @@ router.post("/products/:id/image", uploadSingleImage, async (req, res) => {
     const productId = Number(req.params.id);
 
     try {
-        const product = await productsService.getProductById(productId);
+        const product = await productsService.getProductById(
+            productId,
+            res.locals.user!.id
+        );
         if (!product) {
             res.status(404).json({ message: "Produk tidak ditemukan" });
             return;
@@ -187,7 +211,11 @@ router.post("/products/:id/image", uploadSingleImage, async (req, res) => {
             await destroyImage(String(product.image_public_id));
         }
 
-        const data = await productsService.updateProduct(productId, uploaded);
+        const data = await productsService.updateProduct(
+            productId,
+            uploaded,
+            res.locals.user!.id
+        );
         res.status(200).json({ message: "Foto produk diperbarui!", data });
     } catch (error) {
         console.error("Upload product image error:", error);
@@ -202,7 +230,10 @@ router.delete("/products/:id/image", async (req, res) => {
     const productId = Number(req.params.id);
 
     try {
-        const product = await productsService.getProductById(productId);
+        const product = await productsService.getProductById(
+            productId,
+            res.locals.user!.id
+        );
         if (!product) {
             res.status(404).json({ message: "Produk tidak ditemukan" });
             return;
@@ -212,10 +243,11 @@ router.delete("/products/:id/image", async (req, res) => {
             await destroyImage(String(product.image_public_id));
         }
 
-        const data = await productsService.updateProduct(productId, {
-            image_url: null,
-            image_public_id: null,
-        });
+        const data = await productsService.updateProduct(
+            productId,
+            { image_url: null, image_public_id: null },
+            res.locals.user!.id
+        );
         res.status(200).json({ message: "Foto produk dihapus!", data });
     } catch (error) {
         console.error("Delete product image error:", error);
@@ -225,7 +257,10 @@ router.delete("/products/:id/image", async (req, res) => {
 
 router.get("/products/:id/adjustments", async (req, res) => {
     try {
-        const data = await stockAdjustmentsService.getAdjustmentsByProduct(Number(req.params.id));
+        const data = await stockAdjustmentsService.getAdjustmentsByProduct(
+            Number(req.params.id),
+            res.locals.user!.id
+        );
         res.status(200).json({ message: "Berhasil fetch riwayat adjustment!", data });
     } catch (error) {
         console.error("Get adjustments error:", error);
@@ -256,7 +291,7 @@ router.post("/stock-adjustments", async (req, res) => {
 
 router.get("/orders", async (req, res) => {
     try {
-        const data = await ordersService.getAllOrders();
+        const data = await ordersService.getOrdersByOwner(res.locals.user!.id);
         res.status(200).json({ message: "Berhasil fetch semua order!", data });
     } catch (error) {
         console.error("Get all orders error:", error);
@@ -272,7 +307,11 @@ router.get("/reports/revenue", async (req, res) => {
             return;
         }
 
-        const data = await reportsService.getRevenueSummary(String(start), String(end));
+        const data = await reportsService.getRevenueSummary(
+            String(start),
+            String(end),
+            res.locals.user!.id
+        );
         res.status(200).json({ message: "Berhasil fetch laporan revenue!", data });
     } catch (error) {
         console.error("Get revenue report error:", error);
@@ -288,7 +327,12 @@ router.get("/reports/top-products", async (req, res) => {
             return;
         }
 
-        const data = await reportsService.getTopProducts(String(start), String(end), 10);
+        const data = await reportsService.getTopProducts(
+            String(start),
+            String(end),
+            res.locals.user!.id,
+            10
+        );
         res.status(200).json({ message: "Berhasil fetch produk terlaris!", data });
     } catch (error) {
         console.error("Get top products error:", error);
@@ -304,7 +348,11 @@ router.get("/reports/margin", async (req, res) => {
             return;
         }
 
-        const data = await reportsService.getMarginReport(String(start), String(end));
+        const data = await reportsService.getMarginReport(
+            String(start),
+            String(end),
+            res.locals.user!.id
+        );
         res.status(200).json({ message: "Berhasil fetch laporan margin!", data });
     } catch (error) {
         console.error("Get margin report error:", error);
@@ -314,7 +362,7 @@ router.get("/reports/margin", async (req, res) => {
 
 router.get("/reports/low-stock", async (req, res) => {
     try {
-        const data = await reportsService.getLowStockProducts();
+        const data = await reportsService.getLowStockProducts(res.locals.user!.id);
         res.status(200).json({ message: "Berhasil fetch produk stok menipis!", data });
     } catch (error) {
         console.error("Get low stock error:", error);
@@ -326,7 +374,8 @@ router.get("/reports/low-stock", async (req, res) => {
 
 router.get("/staff", async (req, res) => {
     try {
-        const data = await usersService.getStaffUsers();
+        const ownerId = res.locals.user!.id;
+        const data = await usersService.getStaffUsers(ownerId);
         res.status(200).json({ message: "Berhasil fetch staff!", data });
     } catch (error) {
         console.error("Get staff error:", error);
@@ -351,11 +400,9 @@ router.post("/staff", async (req, res) => {
             return;
         }
 
-        // Role selalu staff — endpoint ini tidak boleh membuat owner.
-        const data = await usersService.createUser({
-            ...parsed.data,
-            role: "staff",
-        });
+        // Role selalu staff dan owner diambil dari token — bukan dari body.
+        const ownerId = res.locals.user!.id;
+        const data = await usersService.createStaffUser(ownerId, parsed.data);
         res.status(201).json({ message: "Berhasil membuat akun staff!", data });
     } catch (error) {
         console.error("Create staff error:", error);
@@ -374,8 +421,10 @@ router.patch("/staff/:id", async (req, res) => {
     }
 
     try {
+        const ownerId = res.locals.user!.id;
         const data = await usersService.updateStaff(
             Number(req.params.id),
+            ownerId,
             parsed.data
         );
         if (!data) {
@@ -393,7 +442,11 @@ router.patch("/staff/:id", async (req, res) => {
 
 router.get("/orders/:id", async (req, res) => {
     try {
-        const data = await ordersService.getOrderWithItems(Number(req.params.id));
+        const data = await ordersService.getOrderWithItems(
+            Number(req.params.id),
+            undefined,
+            res.locals.user!.id
+        );
         if (!data) {
             res.status(404).json({ message: "Transaksi tidak ditemukan" });
             return;

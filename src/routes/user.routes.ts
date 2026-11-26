@@ -24,7 +24,10 @@ const createToken = (user: { id: number; email: string; role: "owner" | "staff" 
 
 router.get("/users", tokenMiddleWare, async (req: Request, res: Response) => {
   try {
-    const users = await userService.getAllUsers();
+    const users = await userService.getVisibleUsers(
+        res.locals.user!.id,
+        res.locals.user!.role
+    );
 
     res.status(200).json({
       message: "Berhasil fetch users!",

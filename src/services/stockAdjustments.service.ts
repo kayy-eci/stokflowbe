@@ -1,22 +1,27 @@
 import { pool } from "../config/db.ts";
 import type { CreateStockAdjustmentInput } from "../models/schema.ts";
 
-export async function createStockAdjustment(ownerId: number, data: CreateStockAdjustmentInput) {
+export async function createStockAdjustment(
+    ownerId: number,
+    data: CreateStockAdjustmentInput
+) {
     const client = await pool.connect();
 
     try {
         await client.query("BEGIN");
 
+        // Kunci baris produk milik owner ini. Produk owner lain harus terbaca
+        // sebagai "tidak ditemukan", bukan bisa dikoreksi.
         const productResult = await client.query(
-            "SELECT id, stock_qty FROM products WHERE id = $1 FOR UPDATE",
-            [data.product_id]
+            "SELECT id, stock_qty FROM products WHERE id = $1 AND owner_id = $2 FOR UPDATE",
+            [data.product_id, ownerId]
         );
         const product = productResult.rows[0];
         if (!product) {
             throw new Error(`Produk dengan id ${data.product_id} tidak ditemukan`);
         }
 
-        const newStock = product.stock_qty + data.change_qty;
+        const newStock = Number(product.stock_qty) + data.change_qty;
         if (newStock < 0) {
             throw new Error("Stok tidak boleh menjadi negatif");
         }
@@ -42,10 +47,13 @@ export async function createStockAdjustment(ownerId: number, data: CreateStockAd
     }
 }
 
-export async function getAdjustmentsByProduct(productId: number) {
+export async function getAdjustmentsByProduct(productId: number, ownerId: number) {
     const result = await pool.query(
-        "SELECT * FROM stock_adjustments WHERE product_id = $1 ORDER BY created_at DESC",
-        [productId]
+        `SELECT sa.* FROM stock_adjustments sa
+         JOIN products p ON p.id = sa.product_id
+         WHERE sa.product_id = $1 AND p.owner_id = $2
+         ORDER BY sa.created_at DESC`,
+        [productId, ownerId]
     );
     return result.rows;
 }
